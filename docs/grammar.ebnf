@@ -1,0 +1,204 @@
+(* Lynguage Phase 1
+   单引号和双引号内是字面终结符，NL 中的 \r 与 \n 分别代表 CR 与 LF。
+   逗号表示连接，竖线表示选择，方括号表示可选，大括号表示重复零次或多次。
+   ? ... ? 表示需要按文字规则判断的终结符。
+*)
+
+(* 词法 *)
+
+NL              = "\r\n" | "\n" | "\r" ;
+EOF             = ? 输入结束 ? ;
+horizontal      = " " | "\t" ;
+comment         = "#", { ? 除 CR 和 LF 之外的 Unicode 标量值 ? } ;
+letter          = ? Unicode 通用类别 L 的标量值 ? ;
+decimal-digit   = ? Unicode 通用类别 Nd 的标量值 ? ;
+identifier      = (letter | "_"), { letter | decimal-digit | "_" } ;
+keyword         = "def" | "let" | "const" | "struct"
+                | "if" | "elif" | "else" | "while" | "return"
+                | "true" | "false" | "and" | "or" | "not" ;
+digit           = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+digits          = digit, { digit } ;
+integer         = digits ;
+float           = digits, (".", digits, [ exponent ] | exponent) ;
+exponent        = ("e" | "E"), [ "+" | "-" ], digits ;
+string          = '"', { string-char | escape }, '"' ;
+string-char     = ? 除双引号、反斜杠、U+0000 至 U+001F 和 U+007F 之外的 Unicode 标量值 ? ;
+escape          = '\', ('"' | '\' | "n" | "r" | "t") ;
+symbol          = "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | "." | "?"
+                | "+" | "-" | "*" | "/" | "%" | "=" | "==" | "!="
+                | "<" | "<=" | ">" | ">=" | "->" ;
+
+(* 源文件必须是 UTF-8，标识符按源码中的标量序列区分，区分大小写。
+   横向空白和注释不生成记号。注释后的换行按 NL 处理。
+   标识符扫描完成后，完全匹配 keyword 的拼写识别为关键字。
+   符号按最长匹配扫描。相邻的两个 > 是两个记号。类型实参的结束符 > 与
+   紧随其后的 = 之间必须留空白，以避免组成 >=。
+   数字从 ASCII 数字开始。小数点后紧跟 ASCII 数字时才将小数点并入数字。
+   数字后紧邻 e 或 E 时开始扫描指数，缺少指数数字构成词法错误。
+   单目符号独立于数字记号。字符串内的未知转义和未闭合字符串构成词法错误。
+*)
+
+(* 声明和语句 *)
+
+program         = { NL }, [ top-item, { nls, top-item }, { NL } ], EOF ;
+nls             = NL, { NL } ;
+top-item        = struct-decl | function-decl | statement ;
+struct-decl     = "struct", identifier, [ type-parameters ], "{", { NL },
+                  [ field, { nls, field }, { NL } ], "}" ;
+field           = identifier, ":", type-ref ;
+function-decl   = "def", [ receiver ], identifier, [ type-parameters ],
+                  "(", [ parameters ], ")", "->", type-ref, block ;
+receiver        = "(", [ "const" ], identifier, ":", type-ref, ")" ;
+parameters      = parameter, { ",", parameter }, [ "," ] ;
+parameter       = identifier, ":", type-ref ;
+type-parameters = "<", { NL }, identifier,
+                  { { NL }, ",", { NL }, identifier },
+                  [ { NL }, "," ], { NL }, ">" ;
+type-ref        = identifier, [ type-arguments ] ;
+type-arguments  = "<", { NL }, type-ref,
+                  { { NL }, ",", { NL }, type-ref },
+                  [ { NL }, "," ], { NL }, ">" ;
+
+block           = "{", { NL }, [ statement, { nls, statement }, { NL } ], "}" ;
+statement       = binding | if-stmt | while-stmt | return-stmt | expr-stmt ;
+binding         = ("let" | "const"), identifier, [ ":", type-ref ], "=", expression ;
+if-stmt         = "if", expression, block,
+                  { { NL }, "elif", expression, block },
+                  [ { NL }, "else", block ] ;
+while-stmt      = "while", expression, block ;
+return-stmt     = "return", [ expression ] ;
+expr-stmt       = expression, [ "=", expression ] ;
+
+(* 表达式。由上到下，二元优先级从低到高。 *)
+
+expression      = disjunction ;
+disjunction     = conjunction, { "or", conjunction } ;
+conjunction     = equality, { "and", equality } ;
+equality        = comparison, { ("==" | "!="), comparison } ;
+comparison      = sum, { ("<" | "<=" | ">" | ">="), sum } ;
+sum             = product, { ("+" | "-"), product } ;
+product         = prefix, { ("*" | "/" | "%"), prefix } ;
+prefix          = ("not" | "+" | "-"), prefix | postfix ;
+postfix         = primary, { call | generic-call | index | member | "?" } ;
+call            = "(", [ call-arguments ], ")" ;
+generic-call    = type-arguments, call ;
+call-arguments  = (positional-list | named-list), [ "," ] ;
+positional-list = expression, { ",", expression } ;
+named-list      = named-argument, { ",", named-argument } ;
+named-argument  = identifier, ":", expression ;
+index           = "[", expression, "]" ;
+member          = ".", identifier ;
+primary         = identifier | integer | float | string | "true" | "false"
+                | "(", expression, ")" ;
+
+(* 解析规则
+
+   P1. 匹配的圆括号与方括号内忽略 NL。类型形参和类型实参列表允许在
+       产生式显式标记 NL 的位置换行。其他位置用 NL 分隔同一列表内的
+       语句、顶层项目或字段。最后一项可直接接块结束符或 EOF。
+       if 分支后只有在下一个非 NL 记号为 elif 或 else 时才消耗分隔换行
+       来继续同一个 if。块可以为空。分号没有语法含义，也不是合法记号。
+
+   P2. 在表达式中，只有当 < 紧接标识符或成员选择的末尾，而且从 < 开始
+       能匹配完整的 type-arguments 并紧随调用的开括号时，才优先识别
+       generic-call。> 和 ( 之间可以有横向空白，不能有未被 P1 忽略的 NL。
+       泛型识别条件不成立时，< 作为二元比较符处理。类型与声明位置的 <
+       无需紧接名称。例如 f<Box<int>>(x) 是泛型调用，a < b > (c) 由
+       两个比较运算组成，a<b>(c) 是泛型调用。
+
+   P3. 二元运算从左结合，前缀运算从右结合，同一级的后缀从左到右附着。
+       例如 -f(x)? 解析为 -(f(x)?)。赋值只出现在语句中，= 左侧的
+       最外层语法节点必须是标识符、成员访问或索引。赋值不可连写。
+
+   P4. 调用实参以开括号后的首个参数开头来区分形式。若首个标识符紧随
+       冒号，则整个列表为命名实参。其余情况使用位置实参。两种形式
+       均可有尾逗号，且不可混写。
+*)
+
+(* 静态语义
+
+   S1. 结构体、函数、方法签名在分析函数体或顶层语句前登记，允许向前
+       引用和递归。绑定按块形成词法作用域，同一作用域禁止同名声明。
+       内层可以遮蔽外层。绑定先解析初始值，再把名称引入当前作用域。
+       顶层语句按源码顺序执行，函数体可引用定义位置之前声明的顶层
+       绑定。顶层代码只能在绑定声明后直接引用它。间接读取尚未初始化
+       的顶层绑定引发运行时错误。结构体同时引入同名构造器。预置类型
+       和预置函数占用相应的顶层名字。成员名在所属结构体内唯一。
+
+   S2. int 是 int64 的别名，float 是 float64 的别名。int32 与 int64
+       是不同类型，float32 与 float64 也是不同类型。整数字面量和浮点
+       字面量在没有具体上下文时分别取 int 和 float。有相同数值类别的
+       期望类型时，字面量采用该类型。字面量及其直接负号合成的常量须在
+       对应类型的范围内。具体数值类型之间的显式转换写为类型名加一个
+       位置实参。除字面量定型外，类型约束按别名展开后的类型等同判断，
+       无隐式数值转换。str 是 UTF-8 文本。类型实参代入后，void 只可
+       用作函数或方法的返回类型及 Result 的成功类型，不能用作存储类型。
+
+   S3. 类型名须解析到预置类型、结构体或当前作用域的类型形参。使用
+       泛型类型时，类型实参数量必须与声明一致。Slice 有一个类型实参，
+       Result 有两个。声明内的类型形参名称必须唯一。泛型调用可显式
+       提供完整的实参列表，或者根据位置实参、结构体字段初始值和期望
+       返回类型统一求解。所有形参都必须得到唯一且一致的类型。
+
+   S4. 字段和参数须标注可存储的类型。绑定须有初始值，省略类型时从
+       初始值推断。赋值要求左右类型相同。const 声明和 const 接收者
+       禁止对该绑定本身、直接字段赋值，也禁止直接调用该结构体上的
+       可变接收者方法。判断直接接收者时忽略圆括号。别名、嵌套对象和
+       切片元素保持各自的可变性。普通 let、参数和无 const 的接收者
+       是可变绑定。
+
+   S5. 结构体没有继承关系，赋值、传参与返回均传递结构体引用。命名
+       实参仅用于结构体构造，字段必须各出现一次，字段顺序任意。空
+       结构体使用空实参列表构造。方法接收者类型必须是本程序声明的
+       结构体。泛型接收者的类型实参必须是与结构体形参一一对应的不同
+       裸标识符，按位置在方法签名及方法体中引入类型形参。方法自己的
+       类型形参不能与接收者引入的名称重复。普通函数和方法通过位置
+       实参调用。函数名、类型名和方法选择仅可在各自适用的调用或类型
+       位置使用，字段选择可作为值使用。
+
+   S6. if、elif、while 的条件类型必须为 bool。and、or、not 只适用
+       于 bool，and 和 or 从左到右短路求值。数字的单目 + 和 - 保持
+       操作数类型。二元 +、-、*、/ 适用于同类型数值，% 只适用于同
+       类型整数。+ 也可连接两个 str。<、<=、>、>= 适用于同类型数值
+       或两个 str。==、!= 适用于同类型数值、bool 或 str。比较和相等
+       运算返回 bool。索引要求 Slice<T> 和 int，元素类型为 T。
+
+   S7. return 和 ? 只能出现在函数或方法内。裸 return 只适用于 void。
+       返回表达式的类型须等于声明的非 void 类型。非 void 函数或方法
+       的所有可正常完成的控制流路径都必须返回值。void 表达式仅能用
+       作独立语句。
+
+   S8. Ok(v) 和 Err(e) 分别接收一个成功值和一个错误值，返回 Result<T, E>。
+       缺失的类型参数须从上下文求得，或用 Ok<T, E>、Err<T, E> 显式
+       给出。Ok() 仅用于 Result<void, E>。Result 的 E 必须可存储。
+       E 类型相同且当前函数返回 Result<U, E> 时，允许对 Result<T, E>
+       使用后缀 ?。Ok 时取出 T，Err 时将原始错误立即作为当前函数的
+       Err 返回。T 为 void 时，取出的表达式类型为 void。
+
+   S9. 内置函数签名
+
+       println  接受零个或多个非 void 的位置实参，输出以空格分隔的一行，返回 void
+       clock_ns() -> int
+       rand_int(upper: int) -> int
+       make_slice<T>(length: int, capacity: int) -> Slice<T>
+       len<T>(slice: Slice<T>) -> int
+       cap<T>(slice: Slice<T>) -> int
+       append<T>(slice: Slice<T>, item: T) -> Slice<T>
+       read_file(path: str) -> Result<str, str>
+       write_file(path: str, data: str) -> Result<void, str>
+
+       rand_int 在 [0, upper) 中取值，upper 须为正。clock_ns 返回距
+       Unix 纪元的纳秒数。read_file 读取 UTF-8 文本，write_file 创建
+       或覆盖 UTF-8 文本文件。I/O 失败或读到无效 UTF-8 时返回 Err(str)。
+
+   S10. make_slice 要求 0 <= length <= capacity，索引要求
+        0 <= index < length，违反约束产生运行时错误。VM 切片头显式
+        保存 {Data, Len, Cap}。复制切片头可以共享底层数据。新暴露的
+        初始元素取零值：数值为 0，bool 为 false，str 为空字符串，
+        Slice 为空切片，结构体引用为空引用，Result 为 Err(错误类型的
+        零值)。对空结构体引用访问成员或调用方法引发运行时错误。
+        append 写入末尾并返回更新的切片头。容量不足时分配新存储，复制
+        现有元素并将容量翻倍。容量为零时从一开始。结构体引用、切片
+        底层数据等托管对象由 Go 宿主 GC 回收。VM 和 Go 转译模式共享
+        以上语言行为。
+*)

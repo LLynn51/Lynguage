@@ -1,0 +1,77 @@
+# 参考文档
+*.pdf
+
+
+# Go相关
+
+# 二进制文件与编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go工作区
+go.work
+go.work.sum
+
+# 构建输出目录
+bin/
+dist/
+build/
+
+# 调试与覆盖率文件
+__debug_bin*
+coverage.out
+coverage.html
+*.prof
+
+# 环境变量与本地配置
+.env
+.env.*
+!.env.example
+
+
+# Python相关
+
+# 字节码与缓存目录
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# 打包与构建产物
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+.eggs/
+
+# 测试与覆盖率报告
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.tox/
+.nox/
+
+# 本地环境与密钥配置
+.env
+.env.*
+!.env.example
+*.local
+
+# Jupyter Notebook 检查点
+.ipynb_checkpoints/
