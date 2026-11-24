@@ -287,16 +287,41 @@ type checker struct {
 	global         *scope
 	inferred       []inferredBinding
 	instantiations []instantiation
+	info           *Info
+}
+
+// Info 保存执行后端需要的表达式类型和调用的泛型实参。
+// 方法调用的 TypeArgs 只包含方法自身的形参，接收者实参来自接收者表达式的类型。
+type Info struct {
+	ExprTypes map[ast.Expr]*ast.TypeRef
+	TypeArgs  map[*ast.CallExpr][]*ast.TypeRef
 }
 
 // Check 检查已解析的程序，返回首个静态类型错误。检查成功后，省略的
 // let 和 const 类型以规范类型名和完整的类型实参回填到 BindingStmt.Type。
 func Check(program *ast.Program) error {
+	return check(program, nil)
+}
+
+// CheckWithInfo 和 Check 执行相同的检查，并返回已解析的类型信息。
+func CheckWithInfo(program *ast.Program) (*Info, error) {
+	info := &Info{
+		ExprTypes: make(map[ast.Expr]*ast.TypeRef),
+		TypeArgs:  make(map[*ast.CallExpr][]*ast.TypeRef),
+	}
+	if err := check(program, info); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func check(program *ast.Program, info *Info) error {
 	c := checker{
 		structures:   make(map[string]*structure),
 		functions:    builtins(),
 		declarations: make(map[*ast.FuncDecl]*signature),
 		global:       newScope(nil),
+		info:         info,
 	}
 	if err := c.register(program); err != nil {
 		return err
@@ -742,6 +767,8 @@ type expressionCheck struct {
 	uses      []typeUse
 	operators []operation
 	instances []instantiation
+	exprTypes map[ast.Expr]*valueType
+	callTypes map[*ast.CallExpr][]*valueType
 }
 
 func (c context) checkExpr(expr ast.Expr, expected *valueType, allowVoid bool) (*valueType, error) {
@@ -792,6 +819,18 @@ func (x *expressionCheck) finish() error {
 		}
 	}
 	x.checker.instantiations = append(x.checker.instantiations, x.instances...)
+	if info := x.checker.info; info != nil {
+		for expr, typ := range x.exprTypes {
+			info.ExprTypes[expr] = typ.ref(expr.Span())
+		}
+		for call, args := range x.callTypes {
+			refs := make([]*ast.TypeRef, len(args))
+			for i, arg := range args {
+				refs[i] = arg.ref(call.Span())
+			}
+			info.TypeArgs[call] = refs
+		}
+	}
 	return nil
 }
 
@@ -821,8 +860,26 @@ func (x *expressionCheck) use(expr ast.Expr, allowVoid bool) (*valueType, error)
 	typ, err := x.expr(expr)
 	if err == nil {
 		x.uses = append(x.uses, typeUse{span: expr.Span(), typ: typ, allowVoid: allowVoid})
+		x.recordType(expr, typ)
 	}
 	return typ, err
+}
+
+func (x *expressionCheck) recordType(expr ast.Expr, typ *valueType) {
+	if x.checker.info == nil {
+		return
+	}
+	if x.exprTypes == nil {
+		x.exprTypes = make(map[ast.Expr]*valueType)
+	}
+	for {
+		x.exprTypes[expr] = typ
+		group, ok := expr.(*ast.GroupExpr)
+		if !ok {
+			return
+		}
+		expr = group.Inner
+	}
 }
 
 func (x *expressionCheck) expr(expr ast.Expr) (*valueType, error) {
@@ -879,7 +936,9 @@ func (x *expressionCheck) number(kind lexer.Kind, raw string, span lexer.Span) *
 func (x *expressionCheck) unary(node *ast.UnaryExpr) (*valueType, error) {
 	if node.Operator.Kind == lexer.Minus {
 		if literal, ok := node.Operand.(*ast.LiteralExpr); ok && (literal.Kind == lexer.Integer || literal.Kind == lexer.Float) {
-			return x.number(literal.Kind, "-"+literal.Raw, node.Span()), nil
+			typ := x.number(literal.Kind, "-"+literal.Raw, node.Span())
+			x.recordType(literal, typ)
+			return typ, nil
 		}
 	}
 	operand, err := x.value(node.Operand)
@@ -1070,6 +1129,12 @@ func (x *expressionCheck) typeArguments(node *ast.CallExpr, name string, params 
 		}
 		x.instances = append(x.instances, instantiation{span: span, param: param, argument: arg})
 		args[i] = arg
+	}
+	if x.checker.info != nil && len(args) != 0 {
+		if x.callTypes == nil {
+			x.callTypes = make(map[*ast.CallExpr][]*valueType)
+		}
+		x.callTypes[node] = args
 	}
 	return args, nil
 }
