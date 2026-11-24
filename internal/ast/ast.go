@@ -46,8 +46,9 @@ type Identifier struct {
 
 type TypeRef struct {
 	NodeSpan
-	Name Identifier
-	Args []*TypeRef
+	Name       Identifier
+	Args       []*TypeRef
+	GlobalName bool `json:",omitempty"` // 推断结果中的预置类型或顶层结构体名称。
 }
 
 // TypedName 表示带类型标注的字段、参数或接收者绑定。
