@@ -1,0 +1,43 @@
+# 原地升序排序。传参会复制切片头，索引赋值会写入共享的底层数据。
+def bubble_sort(items: Slice<int>) -> void {
+    let remaining: int = len(items)
+    while remaining > 1 {
+        let swapped = false
+        let right = 1
+        while right < remaining {
+            let left = right - 1
+            if items[left] > items[right] {
+                let saved = items[left]
+                items[left] = items[right]
+                items[right] = saved
+                swapped = true
+            }
+            right = right + 1
+        }
+
+        # 一轮没有交换，说明剩余元素已按序排列。
+        if not swapped {
+            return
+        }
+        # 本轮最大值已经移到未排序区间的末尾。
+        remaining = remaining - 1
+    }
+}
+
+const INITIAL_CAPACITY: int = 2
+let values: Slice<int> = make_slice<int>(2, INITIAL_CAPACITY)
+values[0] = 5
+values[1] = -1
+
+# append 返回更新后的切片头，原容量已满时会扩容。
+values = append(values, 3)
+values = append(values, 3)
+values = append(values, 0)
+println("长度和容量", len(values), cap(values))
+
+bubble_sort(values)
+let index = 0
+while index < len(values) {
+    println(values[index])
+    index = index + 1
+}
