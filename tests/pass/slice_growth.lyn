@@ -1,0 +1,8 @@
+let values = make_slice<int>(0, 1)
+println(len(values), cap(values))
+values = append(values, 10)
+println(len(values), cap(values))
+values = append(values, 20)
+println(len(values), cap(values))
+values = append(values, 30)
+println(len(values), cap(values), values)

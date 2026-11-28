@@ -1,0 +1,16 @@
+let iterations = 500000
+let values = make_slice<int>(0, 0)
+let index = 0
+let checksum = 0
+
+let started = clock_ns()
+while index < iterations {
+    let value = (index * 17 + 3) % 1000003
+    values = append(values, value)
+    checksum = checksum + value
+    index = index + 1
+}
+checksum = checksum + len(values)
+let elapsed = clock_ns() - started
+
+println("elapsed_ns", elapsed, "checksum", checksum)

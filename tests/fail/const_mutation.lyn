@@ -1,0 +1,6 @@
+struct Counter {
+    value: int
+}
+
+const counter = Counter(value: 1)
+counter.value = 2

@@ -1,0 +1,12 @@
+let iterations = 1000000
+let index = 0
+let checksum = 0
+
+let started = clock_ns()
+while index < iterations {
+    checksum = checksum + ((index * 31 + 7) % 1000003)
+    index = index + 1
+}
+let elapsed = clock_ns() - started
+
+println("elapsed_ns", elapsed, "checksum", checksum)

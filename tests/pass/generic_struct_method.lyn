@@ -1,0 +1,16 @@
+struct Box<T> {
+    value: T
+}
+
+def (const self: Box<T>) get() -> T {
+    return self.value
+}
+
+def (self: Box<T>) replace(value: T) -> void {
+    self.value = value
+}
+
+let box = Box(value: "first")
+println(box.get())
+box.replace("second")
+println(box.get())

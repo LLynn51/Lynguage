@@ -1,0 +1,9 @@
+def load() -> Result<int, str> {
+    return Err("unavailable")
+}
+
+def evaluate() -> Result<int, bool> {
+    return Ok(load()?)
+}
+
+println(evaluate())

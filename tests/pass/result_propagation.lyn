@@ -1,0 +1,14 @@
+def positive(value: int) -> Result<int, str> {
+    if value < 0 {
+        return Err("negative")
+    }
+    return Ok(value)
+}
+
+def twice(value: int) -> Result<int, str> {
+    let checked = positive(value)?
+    return Ok(checked * 2)
+}
+
+println(twice(7))
+println(twice(-1))

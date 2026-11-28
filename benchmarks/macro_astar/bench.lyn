@@ -1,0 +1,113 @@
+def absolute(value: int) -> int {
+    if value < 0 {
+        return -value
+    }
+    return value
+}
+
+def heuristic(node: int, goal: int, width: int) -> int {
+    let x = node % width
+    let y = node / width
+    let goal_x = goal % width
+    let goal_y = goal / width
+    return absolute(goal_x - x) + absolute(goal_y - y)
+}
+
+def is_blocked(node: int, width: int, height: int) -> bool {
+    let x = node % width
+    let y = node / width
+    if x == 0 or y == height - 1 {
+        return false
+    }
+    let vertical_wall = x % 9 == 4 and y % 10 != 5
+    let horizontal_wall = y % 13 == 7 and x % 12 != 6
+    return vertical_wall or horizontal_wall
+}
+
+def relax(
+    current: int,
+    neighbor: int,
+    width: int,
+    height: int,
+    scores: Slice<int>,
+    opened: Slice<bool>,
+    closed: Slice<bool>,
+) -> void {
+    if closed[neighbor] or is_blocked(neighbor, width, height) {
+        return
+    }
+    let candidate = scores[current] + 1
+    if not opened[neighbor] or candidate < scores[neighbor] {
+        scores[neighbor] = candidate
+        opened[neighbor] = true
+    }
+}
+
+let width = 64
+let height = 64
+let node_count = width * height
+let goal = node_count - 1
+let infinity = 1000000000
+
+let started = clock_ns()
+let scores = make_slice<int>(node_count, node_count)
+let opened = make_slice<bool>(node_count, node_count)
+let closed = make_slice<bool>(node_count, node_count)
+let index = 0
+while index < node_count {
+    scores[index] = infinity
+    index = index + 1
+}
+scores[0] = 0
+opened[0] = true
+
+let found = false
+let searching = true
+let expanded = 0
+while searching and not found {
+    let best = -1
+    let best_score = infinity
+    index = 0
+    while index < node_count {
+        if opened[index] and not closed[index] {
+            let estimate = scores[index] + heuristic(index, goal, width)
+            if estimate < best_score {
+                best = index
+                best_score = estimate
+            }
+        }
+        index = index + 1
+    }
+
+    if best < 0 {
+        searching = false
+    } elif best == goal {
+        found = true
+    } else {
+        opened[best] = false
+        closed[best] = true
+        expanded = expanded + 1
+        let x = best % width
+        let y = best / width
+        if x > 0 {
+            relax(best, best - 1, width, height, scores, opened, closed)
+        }
+        if x + 1 < width {
+            relax(best, best + 1, width, height, scores, opened, closed)
+        }
+        if y > 0 {
+            relax(best, best - width, width, height, scores, opened, closed)
+        }
+        if y + 1 < height {
+            relax(best, best + width, width, height, scores, opened, closed)
+        }
+    }
+}
+
+let checksum = -1
+if found {
+    checksum = scores[goal] * 1000000 + expanded
+}
+let elapsed = clock_ns() - started
+
+println("elapsed_ns", elapsed, "checksum", checksum)

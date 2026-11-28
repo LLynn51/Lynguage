@@ -1,0 +1,4 @@
+let answer = 40
+let label = "answer"
+let enabled = true
+println(answer + 2, label, enabled)
